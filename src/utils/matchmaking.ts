@@ -82,8 +82,10 @@ export function subscribeToMatchChanges(
     return null;
   }
 
-  return supabase
-    .channel(`match_${matchId}`)
+  // Kanal nomini soddalashtiramiz va log qo'shamiz
+  const channel = supabase.channel(`match_channel:${matchId}`);
+
+  channel
     .on(
       'postgres_changes',
       {
@@ -93,13 +95,23 @@ export function subscribeToMatchChanges(
         filter: `id=eq.${matchId}`,
       },
       (payload) => {
-        const updatedRow = payload.new as MatchLobbyRow;
+        console.log("Realtime payload keldi:", payload); // <-- Buni F12 da tekshiring!
+        const updatedRow = payload.new as any;
+        
         if (updatedRow.status === 'matched' && updatedRow.room_id) {
+          console.log("Raqib topildi, Room ID:", updatedRow.room_id);
           onMatched(updatedRow.room_id);
         }
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      console.log("Realtime ulanish holati:", status); // <-- "SUBSCRIBED" bo'lishi shart!
+      if (status !== 'SUBSCRIBED') {
+        console.error("Realtime ulanish xatosi:", status);
+      }
+    });
+
+  return channel;
 }
 
 // 3. Kutish zalidan chiqib ketish

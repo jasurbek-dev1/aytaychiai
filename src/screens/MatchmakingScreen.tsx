@@ -16,7 +16,7 @@ export default function MatchmakingScreen({ user, onMatchStart, onAIStart }: Mat
     let subscription: any = null;
     let timer: ReturnType<typeof setTimeout>;
 
-    async function init() {
+async function init() {
       const match = await findOrCreateMatch(user.id, user.name);
       
       if (!match) {
@@ -24,14 +24,20 @@ export default function MatchmakingScreen({ user, onMatchStart, onAIStart }: Mat
         return;
       }
 
+      console.log("Match object:", match); // <-- Buni tekshiring! Console'da 'room_id' bormi?
+
       setMatchId(match.id);
 
       if (match.status === 'matched' && match.room_id) {
         onMatchStart(match.room_id);
       } else {
-        // Obunani saqlab qo'yamiz
         subscription = subscribeToMatchChanges(match.id, (roomId) => {
-          onMatchStart(roomId);
+          console.log("Realtime notification received, Room ID:", roomId);
+          if (roomId) {
+             onMatchStart(roomId);
+          } else {
+             console.error("Room ID kelmadi!");
+          }
         });
       }
     }
