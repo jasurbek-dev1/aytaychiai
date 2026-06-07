@@ -1,13 +1,21 @@
 {
+  "nodeModulesDir": "auto",
   "fmt": {
     "lineWidth": 80,
     "indentWidth": 2,
     "singleQuote": false,
     "semiColons": "insert"
   },
-  "lint": true,
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    },
+    "exclude": ["node_modules", ".git"]
+  },
   "workspace": {
-    "include": ["./supabase/functions"],
-    "exclude": ["./node_modules", "./.git"]
+    "members": [
+      "./supabase/functions/telegram-bot",
+      "./supabase/functions/analyze-speech"
+    ]
   }
 }
