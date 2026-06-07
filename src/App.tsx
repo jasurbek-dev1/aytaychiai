@@ -30,12 +30,11 @@ export default function App() {
   const [isAI, setIsAI] = useState(false);
   const [showDevModal, setShowDevModal] = useState(false);
   
-  // Realtime qidiruv holatlari
   const [searchingMatch, setSearchingMatch] = useState(false);
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [showFallbackOptions, setShowFallbackOptions] = useState(false);
   const [timerRef, setTimerRef] = useState<ReturnType<typeof setTimeout> | null>(null);
-
+  
   const [userProfile, setUserProfile] = useState<UserProfile>({
     id: TELEGRAM_USER_ID,
     name: DEFAULT_NAME,
@@ -64,7 +63,6 @@ export default function App() {
     loadUser();
   }, []);
 
-  // Komponent unmount bo'lganda timer'ni tozalash
   useEffect(() => {
     return () => {
       if (timerRef) clearTimeout(timerRef);
@@ -76,11 +74,14 @@ export default function App() {
     setSearchingMatch(true);
     setShowFallbackOptions(false);
 
-    // Agar oldingi timer bo'lsa tozalash
     if (timerRef) clearTimeout(timerRef);
+
+    // 1. Kichik pauza (2 soniya) - ikkala foydalanuvchi bazaga yozilib olishi uchun
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name);
 
+    // Agar bazadan hech narsa qaytmasa yoki xatolik bo'lsa
     if (!matchRow) {
       handleAIDuel(f);
       return;
@@ -88,43 +89,40 @@ export default function App() {
 
     setCurrentMatchId(matchRow.id);
 
+    // 2. Agar status 'matched' bo'lsa, o'yinni boshla
     if (matchRow.status === 'matched' && matchRow.room_id) {
-      const realOpponent: Opponent = {
-        name: matchRow.player_name || 'Arena Fighter',
-        rank: 'B',
-        xp: 1200,
-        avatar: (matchRow.player_name || 'AF').slice(0, 2).toUpperCase(),
-        country: 'UZB',
-      };
-      setOpponent(realOpponent);
-      setIsAI(false);
-      setSearchingMatch(false);
-      setScreen('battle');
+      finalizeBattle(matchRow.room_id, matchRow.player_name || 'Online Opponent');
       return;
     }
 
-    const subscription = subscribeToMatchChanges(matchRow.id, (_roomId) => {
-      const realOpponent: Opponent = {
-        name: 'Online Opponent',
-        rank: 'A',
-        xp: 1500,
-        avatar: 'OP',
-        country: 'UZB',
-      };
-      
+    // 3. Realtime orqali kutish
+    const subscription = subscribeToMatchChanges(matchRow.id, (roomId) => {
       subscription?.unsubscribe();
-      setOpponent(realOpponent);
-      setIsAI(false);
-      setSearchingMatch(false);
-      setScreen('battle');
+      finalizeBattle(roomId, 'Online Opponent');
     });
 
-    // 10 soniyalik fallback taymerni o'rnatish
+    // 4. Agar 10 soniya ichida hech kim topilmasa, keyin AI taklif qil
     const newTimer = setTimeout(() => {
       setShowFallbackOptions(true);
     }, 10000);
     
     setTimerRef(newTimer);
+  }
+
+  function finalizeBattle(roomId: string, oppName: string) {
+    console.log("Match established in room:", roomId); // roomId ishlatildi
+    const realOpponent: Opponent = {
+      name: oppName,
+      rank: 'B',
+      xp: 1200,
+      avatar: (oppName || 'OP').slice(0, 2).toUpperCase(),
+      country: 'UZB',
+    };
+    
+    setOpponent(realOpponent);
+    setIsAI(false);
+    setSearchingMatch(false);
+    setScreen('battle');
   }
 
   function handleAIDuel(f: MatchFilters) {
@@ -137,7 +135,7 @@ export default function App() {
   }
 
   function handleInviteFriend() {
-    const botLink = "https://t.me/share/url?url=" + encodeURIComponent("https://t.me/Akm_04") + "&text=" + encodeURIComponent("⚔️ Come and duel with me in English Speaking Arena! Let's see who speaks better! 🔥");
+    const botLink = "https://t.me/share/url?url=" + encodeURIComponent("https://t.me/dasturchi_27") + "&text=" + encodeURIComponent("⚔️ Come and duel with me in English Speaking Arena! Let's see who speaks better! 🔥");
     if (tg && tg.openTelegramLink) {
       tg.openTelegramLink(botLink);
     } else {
@@ -212,7 +210,7 @@ export default function App() {
         )}
         <button 
           onClick={async () => {
-            if (timerRef) clearTimeout(timerRef); // Qidiruvni to'xtatsak timer ham o'chadi
+            if (timerRef) clearTimeout(timerRef);
             if (currentMatchId) await leaveMatchLobby(currentMatchId);
             setSearchingMatch(false);
           }}

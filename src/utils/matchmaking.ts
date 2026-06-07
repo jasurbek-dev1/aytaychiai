@@ -8,114 +8,74 @@ export interface MatchLobbyRow {
   room_id: string | null;
 }
 
-// 1. Kutish zaliga (Lobby) kirish yoki mavjud raqibni qidirish
 export async function findOrCreateMatch(playerId: string, playerName: string): Promise<MatchLobbyRow | null> {
-  // TypeScript xavfsizligi uchun supabase borligini tekshiramiz
-  if (!supabase) {
-    console.error('Supabase client is not initialized.');
-    return null;
-  }
+  if (!supabase) return null;
 
-  const { data: waitingPlayers, error: fetchError } = await supabase
+  // 1. MUHIM: Har qanday qidiruvdan oldin shu foydalanuvchining 
+  // eski 'waiting' holatidagi qoldiqlarini o'chirib tashlaymiz (duplikatlar oldini olish uchun)
+  await supabase.from('matches').delete().eq('player_id', playerId);
+
+  // 2. Mavjud 'waiting' holatidagi raqibni izlash
+  const { data: waitingPlayers } = await supabase
     .from('matches')
     .select('*')
     .eq('status', 'waiting')
-    .neq('player_id', playerId)
+    .neq('player_id', playerId) // O'zimizni raqib sifatida topmasligimiz uchun
     .order('created_at', { ascending: true })
     .limit(1);
 
-  if (fetchError) {
-    console.error('Error fetching waiting players:', fetchError);
-    return null;
-  }
-
   if (waitingPlayers && waitingPlayers.length > 0) {
-    const opponentMatch = waitingPlayers[0];
-    const generatedRoomId = `room_${opponentMatch.player_id}_${playerId}`;
+    const opponent = waitingPlayers[0];
+    const generatedRoomId = `room_${opponent.player_id}_${playerId}`;
 
-    const { data: updatedMatch, error: updateError } = await supabase
+    // Raqib topildi -> raqibning statusini 'matched' ga o'tkazamiz
+    const { data: updatedMatch, error } = await supabase
       .from('matches')
-      .update({
-        status: 'matched',
-        room_id: generatedRoomId
-      })
-      .eq('id', opponentMatch.id)
+      .update({ status: 'matched', room_id: generatedRoomId })
+      .eq('id', opponent.id)
       .select()
       .single();
 
-    if (updateError) {
-      console.error('Error updating opponent match:', updateError);
-      return null;
-    }
-
+    if (error) return null;
     return updatedMatch;
   }
 
-  const { data: newMatch, error: insertError } = await supabase
+  // 3. Raqib topilmasa, o'zimizni kutish ro'yxatiga qo'shamiz
+  const { data: newMatch, error } = await supabase
     .from('matches')
-    .insert([
-      {
-        player_id: playerId,
-        player_name: playerName,
-        status: 'waiting',
-        room_id: null
-      }
-    ])
+    .insert([{ player_id: playerId, player_name: playerName, status: 'waiting' }])
     .select()
     .single();
 
-  if (insertError) {
-    console.error('Error creating match row:', insertError);
-    return null;
-  }
-
+  if (error) return null;
   return newMatch;
 }
 
-// 2. Realtime obuna bo'lish
-export function subscribeToMatchChanges(
-  matchId: string,
-  onMatched: (roomId: string) => void
-) {
-  if (!supabase) {
-    console.error('Supabase client is not initialized.');
-    return null;
-  }
+export function subscribeToMatchChanges(matchId: string, onMatched: (roomId: string) => void) {
+  if (!supabase) return null;
 
-  // Kanal nomini soddalashtiramiz va log qo'shamiz
-  const channel = supabase.channel(`match_channel:${matchId}`);
+  const channel = supabase.channel(`match:${matchId}`);
 
   channel
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'matches',
-        filter: `id=eq.${matchId}`,
-      },
-      (payload) => {
-        console.log("Realtime payload keldi:", payload); // <-- Buni F12 da tekshiring!
-        const updatedRow = payload.new as any;
-        
-        if (updatedRow.status === 'matched' && updatedRow.room_id) {
-          console.log("Raqib topildi, Room ID:", updatedRow.room_id);
-          onMatched(updatedRow.room_id);
-        }
+    .on('postgres_changes', { 
+      event: 'UPDATE', 
+      schema: 'public', 
+      table: 'matches',
+      filter: `id=eq.${matchId}` 
+    }, (payload: any) => {
+      const row = payload.new;
+      // Agar status 'matched' ga o'zgarsa, o'yinni boshlaymiz
+      if (row.status === 'matched' && row.room_id) {
+        onMatched(row.room_id);
       }
-    )
-    .subscribe((status) => {
-      console.log("Realtime ulanish holati:", status); // <-- "SUBSCRIBED" bo'lishi shart!
-      if (status !== 'SUBSCRIBED') {
-        console.error("Realtime ulanish xatosi:", status);
-      }
-    });
+    })
+    .subscribe();
 
   return channel;
 }
 
-// 3. Kutish zalidan chiqib ketish
 export async function leaveMatchLobby(matchId: string) {
   if (!supabase) return;
+  // O'yin tugaganda yoki chiqib ketganda bazadan o'chiramiz
   await supabase.from('matches').delete().eq('id', matchId);
 }

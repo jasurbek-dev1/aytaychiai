@@ -1,22 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { findOrCreateMatch, subscribeToMatchChanges, leaveMatchLobby } from '../utils/matchmaking';
-import type { UserProfile } from '../types'; // MatchFilters olib tashlandi
+import type { UserProfile } from '../types';
 
-interface MatchmakingProps {
+interface Props {
   user: UserProfile;
   onMatchStart: (roomId: string) => void;
   onAIStart: () => void;
 }
 
-export default function MatchmakingScreen({ user, onMatchStart, onAIStart }: MatchmakingProps) {
-  // matchId ni ref yoki state orqali saqlash uchun
-  const [matchId, setMatchId] = useState<string | null>(null);
+export default function MatchmakingScreen({ user, onMatchStart, onAIStart }: Props) {
+  const matchIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let subscription: any = null;
     let timer: ReturnType<typeof setTimeout>;
 
-async function init() {
+    async function init() {
       const match = await findOrCreateMatch(user.id, user.name);
       
       if (!match) {
@@ -24,39 +23,30 @@ async function init() {
         return;
       }
 
-      console.log("Match object:", match); // <-- Buni tekshiring! Console'da 'room_id' bormi?
-
-      setMatchId(match.id);
+      matchIdRef.current = match.id;
 
       if (match.status === 'matched' && match.room_id) {
         onMatchStart(match.room_id);
       } else {
         subscription = subscribeToMatchChanges(match.id, (roomId) => {
-          console.log("Realtime notification received, Room ID:", roomId);
-          if (roomId) {
-             onMatchStart(roomId);
-          } else {
-             console.error("Room ID kelmadi!");
-          }
+          onMatchStart(roomId);
         });
       }
     }
 
     init();
 
-    // 15 soniyalik taymer
+    // 15 soniyadan keyin AI ga o'tkazish
     timer = setTimeout(() => {
       onAIStart();
     }, 15000);
 
-    // Tozalash funksiyasi
     return () => {
       clearTimeout(timer);
       if (subscription) subscription.unsubscribe();
-      // matchId mavjud bo'lsa lobby'ni tark etamiz
-      if (matchId) leaveMatchLobby(matchId);
+      if (matchIdRef.current) leaveMatchLobby(matchIdRef.current);
     };
-  }, [user.id, user.name, onMatchStart, onAIStart, matchId]);
+  }, [user.id, user.name, onMatchStart, onAIStart]);
 
   return (
     <div className="flex flex-col items-center justify-center h-screen text-white bg-[#1a1a2e]">
