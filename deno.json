@@ -1,0 +1,13 @@
+{
+  "fmt": {
+    "lineWidth": 80,
+    "indentWidth": 2,
+    "singleQuote": false,
+    "semiColons": "insert"
+  },
+  "lint": true,
+  "workspace": {
+    "include": ["./supabase/functions"],
+    "exclude": ["./node_modules", "./.git"]
+  }
+}
