@@ -10,8 +10,16 @@ import { Share2, Bot, ArrowLeft } from 'lucide-react';
 
 const tg = (window as any).Telegram?.WebApp;
 const tgUser = tg?.initDataUnsafe?.user;
-
-const TELEGRAM_USER_ID = tgUser?.id ? tgUser.id.toString() : "123456789";
+const getUniqueId = () => {
+  if (tgUser?.id) return tgUser.id.toString();
+  let savedId = localStorage.getItem('unique_test_id');
+  if (!savedId) {
+    savedId = 'test_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('unique_test_id', savedId);
+  }
+  return savedId;
+};
+const TELEGRAM_USER_ID = getUniqueId();
 const DEFAULT_NAME = tgUser?.first_name || "Alex Thunder";
 
 const AI_OPPONENT: Opponent = {
