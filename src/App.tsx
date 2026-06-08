@@ -11,6 +11,10 @@ import { Share2, Bot, ArrowLeft } from 'lucide-react';
 
 const tg = (window as any).Telegram?.WebApp;
 const tgUser = tg?.initDataUnsafe?.user;
+
+// Telegram bergan start_param ni ushlab olamiz (masalan: invite_k9z2qih)
+const START_PARAM = tg?.initDataUnsafe?.start_param || "";
+
 const getUniqueId = () => {
   if (tgUser?.id) return tgUser.id.toString();
   let savedId = localStorage.getItem('unique_test_id');
@@ -22,7 +26,6 @@ const getUniqueId = () => {
 };
 const TELEGRAM_USER_ID = getUniqueId();
 const DEFAULT_NAME = tgUser?.first_name || "Alex Thunder";
-
 const AI_OPPONENT: Opponent = {
   name: 'ARIA-7 Trainer',
   rank: 'S',
@@ -59,13 +62,33 @@ export default function App() {
     winRate: '0%',
   });
 
+ // 1. Telegram parametridan taklif kodini o'qib olamiz (Component ichida, statelardan pastda tursin)
+  const START_PARAM = tg?.initDataUnsafe?.start_param || "";
+
   const [loading, setLoading] = useState(true);
 
+  // 2. Foydalanuvchi yuklanayotganda taklif kodini tekshirish
   useEffect(() => {
     async function loadUser() {
       try {
         const profile = await getOrCreateProfile(TELEGRAM_USER_ID, DEFAULT_NAME);
         setUserProfile(profile);
+
+        // 🔥 AGAR FOYDALANUVCHI INVITATION LINK ORQALI KIRGAN BO'LSA:
+        if (START_PARAM && START_PARAM.startsWith('invite_')) {
+          console.log("Taklif havolasi aniqlandi:", START_PARAM);
+          
+          // Havoladan taklif qilgan odamning ID-sini ajratib olamiz (invite_123456... -> 123456)
+          const inviterId = START_PARAM.split('_')[1]; 
+          
+          // O'z-o'ziga duel bo'lmasligi uchun tekshiramiz
+          if (inviterId && inviterId !== TELEGRAM_USER_ID) {
+            // Profil yuklanishi bilan avtomatik ravishda matchmaking'ni boshlaymiz
+            setTimeout(() => {
+              handleMatchFound(AI_OPPONENT, { gender: 'any', difficulty: 'intermediate' });
+            }, 1000); 
+          }
+        }
       } catch (error) {
         console.error("Profile load error:", error);
       } finally {
@@ -82,7 +105,7 @@ export default function App() {
     };
   }, [timerRef, currentSubscription]);
 
-  // Tugma bosilganda chaqiriladigan yagona asosiy funksiya
+  // 3. Tugma bosilganda yoki taklif orqali kirganda chaqiriladigan yagona asosiy funksiya
   async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
     setFilters(f);
     setSearchingMatch(true);
@@ -91,7 +114,7 @@ export default function App() {
     if (timerRef) clearTimeout(timerRef);
     if (currentSubscription) currentSubscription.unsubscribe();
 
-    // Lobbiga qo'shilish so'rovi (Faqat 1 marta bajariladi)
+    // Lobbiga qo'shilish so'rovi
     const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name);
 
     if (!matchRow) {
@@ -101,24 +124,30 @@ export default function App() {
 
     setCurrentMatchId(matchRow.id);
 
-    // Varianti A: Agar biz kirganimizda allaqachon kutib turgan raqib bor bo'lsa va uni matched qilgan bo'lsak
+    // VARIANTI A: Agar biror kutayotgan odam bor edi va biz unga ulandik
     if (matchRow.status === 'matched' && matchRow.room_id) {
-      finalizeBattle(matchRow.room_id, matchRow.player_name || 'Online Opponent');
+      finalizeBattle(matchRow.room_id, matchRow.opponent_name || 'Online Opponent');
       return;
     }
 
-    // Varianti B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak, Realtime orqali eshitamiz
-    const sub = subscribeToMatchChanges(matchRow.id, (roomId, oppName) => {
-      if (timerRef) clearTimeout(timerRef);
-      sub?.unsubscribe();
-      finalizeBattle(roomId, oppName);
+    // VARIANTI B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak (Realtime eshitadi)
+    const sub = subscribeToMatchChanges(matchRow.id, (updatedRow: any) => {
+      if (updatedRow && updatedRow.status === 'matched' && updatedRow.room_id) {
+        if (timerRef) clearTimeout(timerRef);
+        sub?.unsubscribe();
+        
+        // Biz birinchi bo'lib kutganimiz uchun kim kelib urilganini bilish maqsadida xavfsiz nom beramiz
+        finalizeBattle(updatedRow.room_id, 'Online Opponent');
+      }
     });
 
-    setCurrentSubscription(sub);
+    if (sub) {
+      setCurrentSubscription(sub);
+    }
 
     // 15 soniya ichida hech kim topilmasa AI variantini chiqarish
     const newTimer = setTimeout(() => {
-      if (sub) sub.unsubscribe();
+      if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
       setShowFallbackOptions(true);
     }, 15000);
     
@@ -149,13 +178,12 @@ export default function App() {
     setShowFallbackOptions(false);
     setScreen('battle');
   }
-
 function handleInviteFriend() {
-  // Har safar unikal bo'lishi uchun vaqt millisekundini qo'shamiz (Keshni urib tushirish uchun)
-  const cacheBuster = Date.now(); 
-  const startParam = `invite_${userProfile.id}_${cacheBuster}`;
+  // Foydalanuvchining ID-sini startParam qilib olamiz
+  const startParam = `invite_${userProfile.id}`;
   
-  const webAppLink = `https://t.me/aytaychiai_bot?start=${startParam}`;
+  // 🎯 ENG MUHIM JOYI: Sening haqiqiy boting logini qo'yildi!
+  const webAppLink = `https://t.me/aytaychiai_bot/app?startapp=${startParam}`;
   
   const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
   const shareLink = `https://t.me/share/url?url=${encodeURIComponent(webAppLink)}&text=${encodeURIComponent(shareText)}`;

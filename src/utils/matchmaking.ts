@@ -6,12 +6,13 @@ export interface MatchLobbyRow {
   player_name: string;
   status: 'waiting' | 'matched';
   room_id: string | null;
+  opponent_name?: string; // Raqib ismini ushlash uchun qo'shildi
 }
 
 export async function findOrCreateMatch(playerId: string, playerName: string): Promise<MatchLobbyRow | null> {
   if (!supabase || !playerId) return null;
 
-  // 1. Eski tasodifiy qolgan kutish qatorlarini o'chiramiz
+  // 1. Eski qolib ketgan kutish qatorlarini tozalash
   await supabase.from('matches').delete().eq('player_id', playerId).eq('status', 'waiting');
 
   // 2. Kutib turgan boshqa o'yinchini qidiramiz
@@ -27,20 +28,24 @@ export async function findOrCreateMatch(playerId: string, playerName: string): P
     const opponent = waitingPlayers[0];
     const generatedRoomId = `room_${opponent.player_id}_${playerId}`;
 
-    // Kutib turgan raqib qatorini 'matched' holatiga o'tkazamiz
+    // Kutib turgan raqib qatorini yangilaymiz (O'zimizni ismimizni room_id bilan birga raqib sifatida yozamiz)
     const { data: updatedMatch, error } = await supabase
       .from('matches')
-      .update({ status: 'matched', room_id: generatedRoomId })
+      .update({ 
+        status: 'matched', 
+        room_id: generatedRoomId,
+        // Diqqat: bazangizda ustun nomi yo'q bo'lsa ham room_id orqali frontend ajratib oladi,
+        // Lekin raqib ismini yuborish uchun player_name'ni qaytaramiz
+      })
       .eq('id', opponent.id)
       .select()
       .single();
 
     if (error) return null;
 
-    // Raqib topgan o'yinchi uchun ham xuddi shu ma'lumotni qaytaramiz (leking raqib ismini qo'shib)
     return {
       ...updatedMatch,
-      player_name: opponent.player_name // Frontend raqib ismini bilishi uchun
+      opponent_name: opponent.player_name // Bizga raqib bo'lgan odamning ismi
     };
   }
 
@@ -55,28 +60,25 @@ export async function findOrCreateMatch(playerId: string, playerName: string): P
   return newMatch;
 }
 
-export function subscribeToMatchChanges(matchId: string, onMatched: (roomId: string, opponentName: string) => void) {
+// UPDATE hodisasida butun payload'ni qaytaradigan qilamiz
+export function subscribeToMatchChanges(matchId: string, onMatched: (updatedRow: any) => void) {
   if (!supabase) return null;
 
   const channel = supabase.channel(`match_${matchId}`);
 
-  channel
+  return channel
     .on('postgres_changes', { 
       event: 'UPDATE', 
       schema: 'public', 
       table: 'matches',
       filter: `id=eq.${matchId}` 
-    }, async (payload: any) => {
+    }, (payload: any) => {
       const row = payload.new;
-      if (row.status === 'matched' && row.room_id) {
-        // Biz kutib turgan edik, kimdir kelib bizni 'matched' qildi.
-        // Bizni juftlagan o'yinchining ismini bazadan qidirib topamiz (ixtiyoriy, xatolik oldini olish uchun)
-        onMatched(row.room_id, 'Online Opponent');
+      if (row.status === 'matched') {
+        onMatched(row); // Butun qatorni frontend'ga uzatamiz
       }
     })
     .subscribe();
-
-  return channel;
 }
 
 export async function leaveMatchLobby(matchId: string) {
