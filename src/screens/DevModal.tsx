@@ -42,8 +42,7 @@ export default function DevModal({ onClose }: DevModalProps) {
         </div>
 
         <a
-          href="https://t.me/dasturchi_27
-          "
+          href="https://t.me/dasturchi_27"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-3 w-full py-4 rounded-2xl bg-gradient-to-r from-[#e94560] to-[#c0392b] text-white font-black text-base tracking-wider shadow-xl shadow-[#e94560]/30 hover:shadow-[#e94560]/50 transition-all duration-200"
