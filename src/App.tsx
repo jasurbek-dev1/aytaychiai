@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import HomeScreen from './screens/HomeScreen';
 import BattleScreen from './screens/BattleScreen';
 import ResultsScreen from './screens/ResultsScreen';
@@ -13,7 +13,6 @@ import { Share2, Bot, ArrowLeft } from 'lucide-react';
 const tg = (window as any).Telegram?.WebApp;
 const tgUser = tg?.initDataUnsafe?.user;
 
-// Telegram bergan start_param ni ushlab olamiz (masalan: invite_k9z2qih)
 const START_PARAM = tg?.initDataUnsafe?.start_param || "";
 
 const getUniqueId = () => {
@@ -25,6 +24,7 @@ const getUniqueId = () => {
   }
   return savedId;
 };
+
 const TELEGRAM_USER_ID = getUniqueId();
 const DEFAULT_NAME = tgUser?.first_name || "Alex Thunder";
 const AI_OPPONENT: Opponent = {
@@ -34,8 +34,6 @@ const AI_OPPONENT: Opponent = {
   avatar: 'AI',
   country: 'BOT',
 };
-
-// ... (Tepadagi importlar va AI_OPPONENT o'z joyida qoladi)
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home');
@@ -50,6 +48,10 @@ export default function App() {
   const [showFallbackOptions, setShowFallbackOptions] = useState(false);
   const [timerRef, setTimerRef] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [currentSubscription, setCurrentSubscription] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  // 🔥 TUZATISH: Polling intervalini renderlardan himoya qilish uchun useRef ishlatamiz
+  const activeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   const [userProfile, setUserProfile] = useState<UserProfile>({
     id: TELEGRAM_USER_ID,
@@ -63,30 +65,21 @@ export default function App() {
     winRate: '0%',
   });
 
- // 1. Telegram parametridan taklif kodini o'qib olamiz (Component ichida, statelardan pastda tursin)
-  const START_PARAM = tg?.initDataUnsafe?.start_param || "";
-
-  const [loading, setLoading] = useState(true);
-
-  // 2. Foydalanuvchi yuklanayotganda taklif kodini tekshirish
+  // Foydalanuvchi yuklanayotganda taklif kodini tekshirish
   useEffect(() => {
     async function loadUser() {
       try {
         const profile = await getOrCreateProfile(TELEGRAM_USER_ID, DEFAULT_NAME);
-        setUserProfile(profile);
+        if (profile) setUserProfile(profile);
 
-        // 🔥 AGAR FOYDALANUVCHI INVITATION LINK ORQALI KIRGAN BO'LSA:
         if (START_PARAM && START_PARAM.startsWith('invite_')) {
           console.log("Taklif havolasi aniqlandi:", START_PARAM);
-          
-          // Havoladan taklif qilgan odamning ID-sini ajratib olamiz (invite_123456... -> 123456)
           const inviterId = START_PARAM.split('_')[1]; 
           
-          // O'z-o'ziga duel bo'lmasligi uchun tekshiramiz
           if (inviterId && inviterId !== TELEGRAM_USER_ID) {
-            // Profil yuklanishi bilan avtomatik ravishda matchmaking'ni boshlaymiz
             setTimeout(() => {
-              handleMatchFound(AI_OPPONENT, { gender: 'any', difficulty: 'intermediate' });
+              // Taklif bilan kirganda to'g'ridan-to'g'ri matchmaking ishga tushadi
+              handleMatchFound({} as Opponent, { gender: 'any', difficulty: 'intermediate' });
             }, 1000); 
           }
         }
@@ -99,19 +92,18 @@ export default function App() {
     loadUser();
   }, []);
 
+  // Komponent yopilganda taymerlarni tozalash loyihasi
   useEffect(() => {
     return () => {
       if (timerRef) clearTimeout(timerRef);
+      if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
       if (currentSubscription) currentSubscription.unsubscribe();
     };
   }, [timerRef, currentSubscription]);
 
-// Polling intervalini xavfsiz boshqarish uchun o'zgaruvchi
-  let activeInterval: ReturnType<typeof setInterval> | null = null;
-
   async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
-    if (!userProfile || !userProfile.id) {
-      console.error("Profil yuklanmagan!");
+    if (!TELEGRAM_USER_ID) {
+      console.error("Foydalanuvchi identifikatori topilmadi!");
       return;
     }
 
@@ -119,35 +111,39 @@ export default function App() {
     setSearchingMatch(true);
     setShowFallbackOptions(false);
 
-    // Oldingi taymer va obunalar bo'lsa tozalaymiz
+    // Eski taymerlarni tozalaymiz
     if (timerRef) clearTimeout(timerRef);
+    if (activeIntervalRef.current) {
+      clearInterval(activeIntervalRef.current);
+      activeIntervalRef.current = null;
+    }
     if (currentSubscription) {
       try { currentSubscription.unsubscribe(); } catch(e){}
     }
 
     // 1. Bazada lobbi yaratamiz yoki boriga ulanamiz
-    const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name || "Fighter");
+    const matchRow = await findOrCreateMatch(TELEGRAM_USER_ID, userProfile.name || "Fighter");
 
     if (!matchRow) {
-      handleAIDuel(f);
+      console.log("Lobby yaratishda xato bo'ldi, fallback variantlar yoqilmoqda...");
+      setShowFallbackOptions(true);
       return;
     }
 
     setCurrentMatchId(matchRow.id);
 
-    // Agar darhol raqib topilgan bo'lsa (Biz 2-o'yinchi bo'lsak va tayyor xonaga ulandik)
+    // Agar biz 2-o'yinchi bo'lsak va darhol tayyor xona (room_id) qaytgan bo'lsa
     if (matchRow.room_id) {
       console.log("Raqib tayyor! O'yinga kirildi:", matchRow.room_id);
       finalizeBattle(matchRow.room_id, matchRow.opponent_name || 'Online Opponent');
       return;
     }
 
-    // Agar biz 1-o'yinchi bo'lsak (waiting), har 2 soniyada bazadan tekshiramiz (Polling)
-    console.log("Kutish boshlandi, qator ID:", matchRow.id);
+    // Agar biz 1-o'yinchi bo'lsak, har 2 soniyada bazadan raqib ulanishini tekshiramiz (Polling)
+    console.log("Kutish boshlandi, xona liniyasi ID:", matchRow.id);
     
-    activeInterval = setInterval(async () => {
+    activeIntervalRef.current = setInterval(async () => {
       try {
-        // 🔥 TUZATISH: TypeScript xato bermasligi uchun supabase borligini tekshiramiz
         if (!supabase) {
           console.error("Supabase yuklanmagan!");
           return;
@@ -157,7 +153,7 @@ export default function App() {
           .from("matches")
           .select("*")
           .eq("id", matchRow.id)
-          .single();
+          .maybeSingle(); // single() xatolik bermasligi uchun maybeSingle() yaxshiroq
 
         if (error) {
           console.error("Polling xatoligi:", error);
@@ -166,13 +162,13 @@ export default function App() {
 
         // Agar ikkinchi odam kelib, bizga room_id yozib ketgan bo'lsa!
         if (data && data.room_id) {
-          if (activeInterval) {
-            clearInterval(activeInterval);
-            activeInterval = null;
+          if (activeIntervalRef.current) {
+            clearInterval(activeIntervalRef.current);
+            activeIntervalRef.current = null;
           }
           if (timerRef) clearTimeout(timerRef);
           
-          console.log("Raqib ulandi! O'yin boshlanmoqda... Room:", data.room_id);
+          console.log("Raqib ulandi! Xona:", data.room_id);
           finalizeBattle(data.room_id, data.opponent_name || 'Online Opponent');
         }
       } catch (err) {
@@ -182,14 +178,14 @@ export default function App() {
 
     // Maksimal kutish vaqti (25 soniya)
     const newTimer = setTimeout(async () => {
-      if (activeInterval) {
-        clearInterval(activeInterval);
-        activeInterval = null;
+      if (activeIntervalRef.current) {
+        clearInterval(activeIntervalRef.current);
+        activeIntervalRef.current = null;
       }
-      console.log("Kutish vaqti tugadi, raqib topilmadi.");
+      console.log("Kutish vaqti tugadi, real raqib topilmadi.");
       
-      // Bazadagi kutish qatorimizni o'chirib tashlaymiz
-      await leaveMatchLobby(userProfile.id);
+      // 🔥 TUZATISH: leaveMatchLobby'ga xona ID sini emas, Telegram ID ni beramiz
+      await leaveMatchLobby(TELEGRAM_USER_ID);
       setShowFallbackOptions(true);
     }, 25000);
     
@@ -220,38 +216,36 @@ export default function App() {
     setShowFallbackOptions(false);
     setScreen('battle');
   }
-function handleInviteFriend() {
-  // Foydalanuvchining ID-sini startParam qilib olamiz
-  const startParam = `invite_${userProfile.id}`;
-  
-  // 🎯 ENG MUHIM JOYI: Sening haqiqiy boting logini qo'yildi!
-  const webAppLink = `https://t.me/aytaychiai_bot/app?startapp=${startParam}`;
-  
-  const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
-  const shareLink = `https://t.me/share/url?url=${encodeURIComponent(webAppLink)}&text=${encodeURIComponent(shareText)}`;
-  
-  if (tg && tg.openTelegramLink) {
-    tg.openTelegramLink(shareLink);
-  } else {
-    window.open(shareLink, '_blank');
+
+  function handleInviteFriend() {
+    const startParam = `invite_${TELEGRAM_USER_ID}`;
+    const webAppLink = `https://t.me/aytaychiai_bot/app?startapp=${startParam}`;
+    const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
+    const shareLink = `https://t.me/share/url?url=${encodeURIComponent(webAppLink)}&text=${encodeURIComponent(shareText)}`;
+    
+    if (tg && tg.openTelegramLink) {
+      tg.openTelegramLink(shareLink);
+    } else {
+      window.open(shareLink, '_blank');
+    }
   }
-}
 
   async function handleBattleEnd(r: BattleResult) {
     setResult(r);
     setScreen('results');
+    
+    // 🔥 TUZATISH: XP ballarini shu yerda bitta o'zgaruvchida qotiramiz, render ichida Math.random() ishlatmaymiz!
     const xpGained = r.won ? Math.floor(Math.random() * 50) + 30 : 10;
     try {
       const updatedProfile = await updateProfileStats(TELEGRAM_USER_ID, xpGained, r.won);
       if (updatedProfile) setUserProfile(updatedProfile);
     } catch (error) {
-      console.error("Failed to update stats:", error);
+      console.error("Stats yangilanishida xato:", error);
     }
     
-    if (currentMatchId) {
-      await leaveMatchLobby(currentMatchId);
-      setCurrentMatchId(null);
-    }
+    // O'yin tugagach kutish lobbisini tozalaymiz
+    await leaveMatchLobby(TELEGRAM_USER_ID);
+    setCurrentMatchId(null);
   }
 
   function handlePlayAgain() {
@@ -275,9 +269,6 @@ function handleInviteFriend() {
   if (searchingMatch) {
     return (
       <div className="min-h-screen bg-[#1a1a2e] flex flex-col items-center justify-center text-white p-6 select-none" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
-        
-        {/* MatchmakingScreen DUBLIKATI BUTUNLAY OLIB TASHLANDI */}
-
         {!showFallbackOptions ? (
           <>
             <div className="relative w-24 h-24 mb-6">
@@ -286,7 +277,7 @@ function handleInviteFriend() {
               <div className="absolute inset-3 bg-slate-800/50 rounded-full flex items-center justify-center font-black text-xl text-[#e94560]">VS</div>
             </div>
             <h2 className="text-xl font-black tracking-widest text-center uppercase mb-1">Searching for Opponent...</h2>
-            <p className="text-xs text-slate-400 tracking-wider text-center animate-pulse">CONNECTING TO LOBBY VIA SUPABASE REALTIME</p>
+            <p className="text-xs text-slate-400 tracking-wider text-center animate-pulse">CONNECTING TO LOBBY VIA SUPABASE</p>
           </>
         ) : (
           <>
@@ -306,8 +297,12 @@ function handleInviteFriend() {
         <button 
           onClick={async () => {
             if (timerRef) clearTimeout(timerRef);
+            if (activeIntervalRef.current) {
+              clearInterval(activeIntervalRef.current);
+              activeIntervalRef.current = null;
+            }
             if (currentSubscription) currentSubscription.unsubscribe();
-            if (currentMatchId) await leaveMatchLobby(currentMatchId);
+            await leaveMatchLobby(TELEGRAM_USER_ID);
             setSearchingMatch(false);
           }}
           className="mt-12 flex items-center gap-2 text-xs text-slate-500 hover:text-white transition-colors uppercase font-bold tracking-wider"
