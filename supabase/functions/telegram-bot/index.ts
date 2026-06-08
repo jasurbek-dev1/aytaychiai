@@ -18,13 +18,19 @@ bot.command("start", async (ctx: Context) => {
   if (!userId) return;
 
   const isSubscribed = await checkSubscription(userId);
-
-  if (!isSubscribed) {
+if (!isSubscribed) {
     const keyboard = new InlineKeyboard()
-      .url("Kanalga obuna bo'lish", "https://t.me/lutfiddinov_dev");
-    return ctx.reply("Subscribe to access the bot.", { reply_markup: keyboard });
-  }
+      .url("🚀 Join Lutfiddinov Dev", "https://t.me/lutfiddinov_dev")
+      .row()
+      .url("📢 Join Aytaychi AI", "https://t.me/aytaychiai_org")
+      .row();
 
+    return ctx.reply(
+      "⚠️ Please subscribe to both channels above, then send /start again to unlock the bot.", 
+      { reply_markup: keyboard }
+    );
+  
+  }
   const menu = new InlineKeyboard()
     .webApp("🗣 Speakingni boshlash", "https://aytaychiai.vercel.app/")
     .row()

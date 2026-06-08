@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import HomeScreen from './screens/HomeScreen';
 import BattleScreen from './screens/BattleScreen';
 import ResultsScreen from './screens/ResultsScreen';
+import MatchmakingScreen from './screens/MatchmakingScreen'; // Komponentingiz qo'shildi
 import DevModal from './screens/DevModal';
 import type { Screen, Opponent, MatchFilters, BattleResult, UserProfile } from './types';
 import { getOrCreateProfile, updateProfileStats } from './utils/supabase';
@@ -143,11 +144,22 @@ export default function App() {
   }
 
   function handleInviteFriend() {
-    const botLink = "https://t.me/share/url?url=" + encodeURIComponent("https://t.me/dasturchi_27") + "&text=" + encodeURIComponent("⚔️ Come and duel with me in English Speaking Arena! Let's see who speaks better! 🔥");
+    // Sizning botingiz user_id sini taklifnoma parametri sifatida yuboramiz
+    const startParam = `invite_${userProfile.id}`;
+    
+    // Telegram WebApp ulashish formati: t.me/bot_user_name/app_name?startapp=parametr
+    const webAppLink = `https://t.me/aytaychiai_bot/app?startapp=${startParam}`;
+    
+    // Do'stga boradigan chiroyli xabar matni
+    const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
+    
+    // Telegram rasmiy ulashish havolasi (Share link)
+    const shareLink = `https://t.me/share/url?url=${encodeURIComponent(webAppLink)}&text=${encodeURIComponent(shareText)}`;
+    
     if (tg && tg.openTelegramLink) {
-      tg.openTelegramLink(botLink);
+      tg.openTelegramLink(shareLink);
     } else {
-      window.open(botLink, '_blank');
+      window.open(shareLink, '_blank');
     }
   }
 
@@ -188,9 +200,20 @@ export default function App() {
     );
   }
 
+  // Barcha eski dizayn, taymer va tugmalar saqlab qolindi. 
+  // Faqat qidiruv mantiqi real vaqtda orqa fonda ishlashi uchun komponent bilan bog'landi.
   if (searchingMatch) {
     return (
       <div className="min-h-screen bg-[#1a1a2e] flex flex-col items-center justify-center text-white p-6 select-none" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+        {/* Orqa fonda Supabase Realtime'ni ushlab turish uchun komponentni ko'rinmas qilib chaqiramiz */}
+        <div className="hidden">
+          <MatchmakingScreen 
+            user={userProfile} 
+            onMatchStart={(roomId) => finalizeBattle(roomId, 'Online Opponent')} 
+            onAIStart={() => handleAIDuel(filters)} 
+          />
+        </div>
+
         {!showFallbackOptions ? (
           <>
             <div className="relative w-24 h-24 mb-6">
