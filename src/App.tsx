@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import HomeScreen from './screens/HomeScreen';
 import BattleScreen from './screens/BattleScreen';
 import ResultsScreen from './screens/ResultsScreen';
-import MatchmakingScreen from './screens/MatchmakingScreen'; // Komponentingiz qo'shildi
+
 import DevModal from './screens/DevModal';
 import type { Screen, Opponent, MatchFilters, BattleResult, UserProfile } from './types';
 import { getOrCreateProfile, updateProfileStats } from './utils/supabase';
@@ -31,6 +31,8 @@ const AI_OPPONENT: Opponent = {
   country: 'BOT',
 };
 
+// ... (Tepadagi importlar va AI_OPPONENT o'z joyida qoladi)
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [opponent, setOpponent] = useState<Opponent>(AI_OPPONENT);
@@ -43,6 +45,7 @@ export default function App() {
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [showFallbackOptions, setShowFallbackOptions] = useState(false);
   const [timerRef, setTimerRef] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [currentSubscription, setCurrentSubscription] = useState<any>(null);
   
   const [userProfile, setUserProfile] = useState<UserProfile>({
     id: TELEGRAM_USER_ID,
@@ -75,22 +78,22 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (timerRef) clearTimeout(timerRef);
+      if (currentSubscription) currentSubscription.unsubscribe();
     };
-  }, [timerRef]);
+  }, [timerRef, currentSubscription]);
 
+  // Tugma bosilganda chaqiriladigan yagona asosiy funksiya
   async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
     setFilters(f);
     setSearchingMatch(true);
     setShowFallbackOptions(false);
 
     if (timerRef) clearTimeout(timerRef);
+    if (currentSubscription) currentSubscription.unsubscribe();
 
-    // 1. Kichik pauza (2 soniya) - ikkala foydalanuvchi bazaga yozilib olishi uchun
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
+    // Lobbiga qo'shilish so'rovi (Faqat 1 marta bajariladi)
     const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name);
 
-    // Agar bazadan hech narsa qaytmasa yoki xatolik bo'lsa
     if (!matchRow) {
       handleAIDuel(f);
       return;
@@ -98,28 +101,32 @@ export default function App() {
 
     setCurrentMatchId(matchRow.id);
 
-    // 2. Agar status 'matched' bo'lsa, o'yinni boshla
+    // Varianti A: Agar biz kirganimizda allaqachon kutib turgan raqib bor bo'lsa va uni matched qilgan bo'lsak
     if (matchRow.status === 'matched' && matchRow.room_id) {
       finalizeBattle(matchRow.room_id, matchRow.player_name || 'Online Opponent');
       return;
     }
 
-    // 3. Realtime orqali kutish
-    const subscription = subscribeToMatchChanges(matchRow.id, (roomId) => {
-      subscription?.unsubscribe();
-      finalizeBattle(roomId, 'Online Opponent');
+    // Varianti B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak, Realtime orqali eshitamiz
+    const sub = subscribeToMatchChanges(matchRow.id, (roomId, oppName) => {
+      if (timerRef) clearTimeout(timerRef);
+      sub?.unsubscribe();
+      finalizeBattle(roomId, oppName);
     });
 
-    // 4. Agar 10 soniya ichida hech kim topilmasa, keyin AI taklif qil
+    setCurrentSubscription(sub);
+
+    // 15 soniya ichida hech kim topilmasa AI variantini chiqarish
     const newTimer = setTimeout(() => {
+      if (sub) sub.unsubscribe();
       setShowFallbackOptions(true);
-    }, 10000);
+    }, 15000);
     
     setTimerRef(newTimer);
   }
 
   function finalizeBattle(roomId: string, oppName: string) {
-    console.log("Match established in room:", roomId); // roomId ishlatildi
+    console.log("Match established in room:", roomId);
     const realOpponent: Opponent = {
       name: oppName,
       rank: 'B',
@@ -143,37 +150,31 @@ export default function App() {
     setScreen('battle');
   }
 
-  function handleInviteFriend() {
-    // Sizning botingiz user_id sini taklifnoma parametri sifatida yuboramiz
-    const startParam = `invite_${userProfile.id}`;
-    
-    // Telegram WebApp ulashish formati: t.me/bot_user_name/app_name?startapp=parametr
-    const webAppLink = `https://t.me/aytaychiai_bot/app?startapp=${startParam}`;
-    
-    // Do'stga boradigan chiroyli xabar matni
-    const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
-    
-    // Telegram rasmiy ulashish havolasi (Share link)
-    const shareLink = `https://t.me/share/url?url=${encodeURIComponent(webAppLink)}&text=${encodeURIComponent(shareText)}`;
-    
-    if (tg && tg.openTelegramLink) {
-      tg.openTelegramLink(shareLink);
-    } else {
-      window.open(shareLink, '_blank');
-    }
+ function handleInviteFriend() {
+  const startParam = `invite_${userProfile.id}`;
+  
+  // Universal ssilka formati (Qisqa nomlar talab qilinmaydi va adashmaydi):
+  const webAppLink = `https://t.me/aytaychiai_bot?start=${startParam}`;
+  
+  const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
+  const shareLink = `https://t.me/share/url?url=${encodeURIComponent(webAppLink)}&text=${encodeURIComponent(shareText)}`;
+  
+  if (tg && tg.openTelegramLink) {
+    tg.openTelegramLink(shareLink);
+  } else {
+    window.open(shareLink, '_blank');
   }
+}
 
   async function handleBattleEnd(r: BattleResult) {
     setResult(r);
     setScreen('results');
-
     const xpGained = r.won ? Math.floor(Math.random() * 50) + 30 : 10;
-
     try {
       const updatedProfile = await updateProfileStats(TELEGRAM_USER_ID, xpGained, r.won);
       if (updatedProfile) setUserProfile(updatedProfile);
     } catch (error) {
-      console.error("Failed to update stats in Supabase:", error);
+      console.error("Failed to update stats:", error);
     }
     
     if (currentMatchId) {
@@ -200,19 +201,11 @@ export default function App() {
     );
   }
 
-  // Barcha eski dizayn, taymer va tugmalar saqlab qolindi. 
-  // Faqat qidiruv mantiqi real vaqtda orqa fonda ishlashi uchun komponent bilan bog'landi.
   if (searchingMatch) {
     return (
       <div className="min-h-screen bg-[#1a1a2e] flex flex-col items-center justify-center text-white p-6 select-none" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
-        {/* Orqa fonda Supabase Realtime'ni ushlab turish uchun komponentni ko'rinmas qilib chaqiramiz */}
-        <div className="hidden">
-          <MatchmakingScreen 
-            user={userProfile} 
-            onMatchStart={(roomId) => finalizeBattle(roomId, 'Online Opponent')} 
-            onAIStart={() => handleAIDuel(filters)} 
-          />
-        </div>
+        
+        {/* MatchmakingScreen DUBLIKATI BUTUNLAY OLIB TASHLANDI */}
 
         {!showFallbackOptions ? (
           <>
@@ -242,6 +235,7 @@ export default function App() {
         <button 
           onClick={async () => {
             if (timerRef) clearTimeout(timerRef);
+            if (currentSubscription) currentSubscription.unsubscribe();
             if (currentMatchId) await leaveMatchLobby(currentMatchId);
             setSearchingMatch(false);
           }}

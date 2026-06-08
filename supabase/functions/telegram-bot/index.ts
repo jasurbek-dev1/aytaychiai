@@ -4,11 +4,10 @@ await bot.init();
 
 async function checkSubscription(userId: number) {
   try {
-    // @sizning_kanalingiz_usernami ni @lutfiddinov_dev ga o'zgartirdik
     const status = await bot.api.getChatMember("@lutfiddinov_dev", userId);
     return ["member", "administrator", "creator"].includes(status.status);
   } catch (err) {
-    console.error("Kanalni tekshirishda xato:", err); // Xatoni logda ko'rish uchun qo'shdim
+    console.error("Kanalni tekshirishda xato:", err);
     return false;
   }
 }
@@ -18,7 +17,7 @@ bot.command("start", async (ctx: Context) => {
   if (!userId) return;
 
   const isSubscribed = await checkSubscription(userId);
-if (!isSubscribed) {
+  if (!isSubscribed) {
     const keyboard = new InlineKeyboard()
       .url("🚀 Join Lutfiddinov Dev", "https://t.me/lutfiddinov_dev")
       .row()
@@ -29,15 +28,15 @@ if (!isSubscribed) {
       "⚠️ Please subscribe to both channels above, then send /start again to unlock the bot.", 
       { reply_markup: keyboard }
     );
-  
   }
+
   const menu = new InlineKeyboard()
-    .webApp("🗣 Speakingni boshlash", "https://aytaychiai.vercel.app/")
+    .webApp("🗣️ Speakingni boshlash", "https://aytaychiai.vercel.app/")
     .row()
     .url("👤 Admin bilan bog'lanish", "https://t.me/dasturchi_27");
 
-  ctx.reply("Hello! Ready to start your practice?", { reply_markup: menu });
-});
+  return ctx.reply("Hello! Ready to start your practice?", { reply_markup: menu });
+}); // Qavs shu yerda muvaffaqiyatli yopildi!
 
 Deno.serve(async (req) => {
   try {
