@@ -107,6 +107,12 @@ export default function App() {
 
   // 3. Tugma bosilganda yoki taklif orqali kirganda chaqiriladigan yagona asosiy funksiya
   async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
+    // 🛡️ XAVFSIZLIK TEKSHIRUVI: Agar profil hali yuklanmagan bo'lsa, bazaga so'rov yubormaymiz
+    if (!userProfile || !userProfile.id) {
+      console.error("Foydalanuvchi profili hali tayyor emas!");
+      return;
+    }
+
     setFilters(f);
     setSearchingMatch(true);
     setShowFallbackOptions(false);
@@ -114,8 +120,8 @@ export default function App() {
     if (timerRef) clearTimeout(timerRef);
     if (currentSubscription) currentSubscription.unsubscribe();
 
-    // Lobbiga qo'shilish so'rovi
-    const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name);
+    // Lobbiga qo'shilish so'rovi (Xavfsiz ID va Ism uzatiladi)
+    const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name || "Fighter");
 
     if (!matchRow) {
       handleAIDuel(f);
@@ -124,20 +130,20 @@ export default function App() {
 
     setCurrentMatchId(matchRow.id);
 
-    // VARIANTI A: Agar biror kutayotgan odam bor edi va biz unga ulandik
-    if (matchRow.status === 'matched' && matchRow.room_id) {
+    // VARIANTI A: Agar ssilka orqali allaqachon kimdir kutayotgan bo'lsa va biz ulandik
+    if (matchRow.status === 'matched' || matchRow.room_id) {
       finalizeBattle(matchRow.room_id, matchRow.opponent_name || 'Online Opponent');
       return;
     }
 
     // VARIANTI B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak (Realtime eshitadi)
     const sub = subscribeToMatchChanges(matchRow.id, (updatedRow: any) => {
-      if (updatedRow && updatedRow.status === 'matched' && updatedRow.room_id) {
+      // Bazadan har qanday holatda qo'shtirnoqli yoki qo'shtirnoqsiz 'matched' kelishini tekshiramiz
+      if (updatedRow && updatedRow.room_id && (updatedRow.status === 'matched' || updatedRow.status?.includes('matched'))) {
         if (timerRef) clearTimeout(timerRef);
         sub?.unsubscribe();
         
-        // Biz birinchi bo'lib kutganimiz uchun kim kelib urilganini bilish maqsadida xavfsiz nom beramiz
-        finalizeBattle(updatedRow.room_id, 'Online Opponent');
+        finalizeBattle(updatedRow.room_id, updatedRow.opponent_name || 'Online Opponent');
       }
     });
 
