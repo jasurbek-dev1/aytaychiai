@@ -7,20 +7,21 @@ function getSupabaseClient() {
   return supabase;
 }
 
-// 1. O'yin yaratish yoki boriga ulanish
+// 1. O'yin yaratish yoki boriga ulanish (Xavfsiz va aniq mantiq)
 export async function findOrCreateMatch(playerId: string, playerName: string) {
   try {
     if (!playerId) return null;
     const client = getSupabaseClient();
 
-    // 1. Eski qotib qolgan qatorlarni tozalash (Faqat 'waiting' holatidagilarni)
+    // 1. Eski qotib qolgan 'waiting' qatorlarimizni tozalaymiz
     await client
       .from("matches")
       .delete()
       .eq("player_id", playerId)
       .eq("status", "waiting");
 
-    // 2. Kutib turgan birinchi faol o'yinchini qidiramiz
+    // 2. Kutib turgan birinchi faol real o'yinchini qidiramiz
+    // .neq("player_id", playerId) orqali o'z-o'zimizga ulanib qolishni oldini olamiz
     const { data: waitingMatches, error: searchError } = await client
       .from("matches")
       .select("*")
@@ -31,38 +32,38 @@ export async function findOrCreateMatch(playerId: string, playerName: string) {
 
     if (searchError) throw searchError;
 
-    // 3. Agar kutayotgan real o'yinchi bo'lsa, unga ulanamiz
+    // 3. Agar kutayotgan o'yinchi topilsa, uning mavjud qatorini YANGILAYMIZ (Unga ulanamiz)
     if (waitingMatches && waitingMatches.length > 0) {
       const targetMatch = waitingMatches[0];
-      // Ikki o'yinchi uchun ham bir xil bo'lgan unikal xona ID-si
       const generatedRoomId = `room_${targetMatch.player_id}_${playerId}`;
 
-      // Kutayotgan o'yinchining qatorini yangilaymiz
+      // MUHIM CHORRAHA: Faqat o'sha o'yinchi hali ham 'waiting' holatida bo'lsagina yangilaymiz
       const { data: updatedMatch, error: updateError } = await client
         .from("matches")
         .update({
           status: "matched",
           room_id: generatedRoomId,
-          opponent_name: playerName // Bizning ismimiz birinchi o'yinchi uchun raqib ismi bo'ladi
+          opponent_name: playerName // 1-o'yinchi bizning ismimizni raqib sifatida ko'radi
         })
         .eq("id", targetMatch.id)
+        .eq("status", "waiting") // Xavfsizlik filtri: boshqa birov ulonib ketmagan bo'lsin
         .select()
         .maybeSingle();
 
-      if (updateError) throw updateError;
-
-      // App.tsx ga ma'lumot qaytaramiz (Biz 2-o'yinchi bo'lganimiz sababli, biz uchun raqib - targetMatch'dir)
-      return {
-        id: targetMatch.id,
-        room_id: generatedRoomId,
-        player_id: playerId,
-        player_name: playerName,
-        opponent_name: targetMatch.player_name || "Online Opponent",
-        status: "matched"
-      };
+      // Agar xatolik bo'lsa yoki biz ulgurgunimizcha kimdir ulanib ketgan bo'lsa, pastga o'tib yangi xona ochadi
+      if (!updateError && updatedMatch) {
+        return {
+          id: updatedMatch.id,
+          room_id: generatedRoomId,
+          player_id: playerId,
+          player_name: playerName,
+          opponent_name: targetMatch.player_name || "Online Opponent",
+          status: "matched"
+        };
+      }
     }
 
-    // 4. Agar hech kim kutmayotgan bo'lsa, o'zimiz navbatga (Lobby) turamiz
+    // 4. Agar hech kim kutmayotgan bo'lsa, o'zimiz 1-o'yinchi bo'lib Lobbida navbatga turamiz
     const { data: newMatch, error: insertError } = await client
       .from("matches")
       .insert([
@@ -75,7 +76,7 @@ export async function findOrCreateMatch(playerId: string, playerName: string) {
         }
       ])
       .select()
-      .maybeSingle(); // single() o'rniga maybeSingle() xatolikni kamaytiradi
+      .maybeSingle();
 
     if (insertError) throw insertError;
     return newMatch;
@@ -86,7 +87,7 @@ export async function findOrCreateMatch(playerId: string, playerName: string) {
   }
 }
 
-// 2. Realtime o'zgarishlarni eshitish (Agar kelajakda polling o'rniga ishlatmoqchi bo'lsangiz)
+// 2. Realtime o'zgarishlarni eshitish
 export function subscribeToMatchChanges(matchId: string, onUpdate: (payload: any) => void) {
   try {
     const client = getSupabaseClient();
@@ -108,15 +109,13 @@ export function subscribeToMatchChanges(matchId: string, onUpdate: (payload: any
   }
 }
 
-// 3. Lobbini tark etish (Faqat o'zimiz ochgan 'waiting' xonani o'chirish)
 // 3. Lobbini tark etish (Xatoliksiz, toza variant)
 export async function leaveMatchLobby(playerId: string) {
   try {
     if (!playerId) return;
     const client = getSupabaseClient();
     
-    // Xavfsiz bo'lishi uchun har bir o'chirish so'rovini alohida-alohida va toza bajaramiz
-    // 1. Agar playerId matches jadvalidagi avto-generatsiya bo'lgan ID (UUID) bo'lsa
+    // 1. Agar playerId matches jadvalidagi UUID bo'lsa
     if (playerId.includes('-') || playerId.length > 20) {
       await client
         .from("matches")
@@ -124,7 +123,7 @@ export async function leaveMatchLobby(playerId: string) {
         .eq("id", playerId);
     }
 
-    // 2. Foydalanuvchining o'z Telegram/Test ID-si bo'yicha kutayotgan xonalarini o'chirish
+    // 2. Foydalanuvchining o'z Telegram ID-si bo'yicha kutayotgan xonalarini o'chirish
     await client
       .from("matches")
       .delete()
