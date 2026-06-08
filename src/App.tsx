@@ -105,11 +105,9 @@ export default function App() {
     };
   }, [timerRef, currentSubscription]);
 
-  // 3. Tugma bosilganda yoki taklif orqali kirganda chaqiriladigan yagona asosiy funksiya
-  async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
-    // 🛡️ XAVFSIZLIK TEKSHIRUVI: Agar profil hali yuklanmagan bo'lsa, bazaga so'rov yubormaymiz
+async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
     if (!userProfile || !userProfile.id) {
-      console.error("Foydalanuvchi profili hali tayyor emas!");
+      console.error("Profil yuklanmagan!");
       return;
     }
 
@@ -120,7 +118,7 @@ export default function App() {
     if (timerRef) clearTimeout(timerRef);
     if (currentSubscription) currentSubscription.unsubscribe();
 
-    // Lobbiga qo'shilish so'rovi (Xavfsiz ID va Ism uzatiladi)
+    // 1. Bazada lobbi yaratamiz yoki boriga ulanamiz
     const matchRow = await findOrCreateMatch(userProfile.id, userProfile.name || "Fighter");
 
     if (!matchRow) {
@@ -130,20 +128,26 @@ export default function App() {
 
     setCurrentMatchId(matchRow.id);
 
-    // VARIANTI A: Agar ssilka orqali allaqachon kimdir kutayotgan bo'lsa va biz ulandik
-    if (matchRow.status === 'matched' || matchRow.room_id) {
+    // VARIANTI A: Agar biz kirganimizda allaqachon kimdir kutayotgan bo'lsa va biz ulandik
+    if (matchRow.status === 'matched' && matchRow.room_id) {
+      console.log("Raqib allaqachon bor ekan, o'yinga kirilyapti:", matchRow.room_id);
       finalizeBattle(matchRow.room_id, matchRow.opponent_name || 'Online Opponent');
       return;
     }
 
-    // VARIANTI B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak (Realtime eshitadi)
+    // VARIANTI B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak
+    console.log("Lobbida kutish boshlandi, id:", matchRow.id);
     const sub = subscribeToMatchChanges(matchRow.id, (updatedRow: any) => {
-      // Bazadan har qanday holatda qo'shtirnoqli yoki qo'shtirnoqsiz 'matched' kelishini tekshiramiz
-      if (updatedRow && updatedRow.room_id && (updatedRow.status === 'matched' || updatedRow.status?.includes('matched'))) {
+      console.log("Bazada o'zgarish sezildi:", updatedRow);
+      
+      if (updatedRow && updatedRow.status === 'matched' && updatedRow.room_id) {
         if (timerRef) clearTimeout(timerRef);
         sub?.unsubscribe();
         
-        finalizeBattle(updatedRow.room_id, updatedRow.opponent_name || 'Online Opponent');
+        // Biroz kutish (baza yangilanishi komponentga yetib borishi uchun)
+        setTimeout(() => {
+          finalizeBattle(updatedRow.room_id, updatedRow.opponent_name || 'Online Opponent');
+        }, 500);
       }
     });
 
@@ -151,11 +155,14 @@ export default function App() {
       setCurrentSubscription(sub);
     }
 
-    // 15 soniya ichida hech kim topilmasa AI variantini chiqarish
-    const newTimer = setTimeout(() => {
-      if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
+    // Vaqtni 15 soniyadan 25 soniyaga uzaytiramiz (Foydalanuvchilar ulanishga ulgurishi uchun)
+    const newTimer = setTimeout(async () => {
+      if (sub) sub.unsubscribe();
+      
+      // Vaqt tugaganda bazadagi kutish qatorimizni o'chirib tashlaymiz, chalkashlik bo'lmasligi uchun
+      await leaveMatchLobby(userProfile.id);
       setShowFallbackOptions(true);
-    }, 15000);
+    }, 25000);
     
     setTimerRef(newTimer);
   }

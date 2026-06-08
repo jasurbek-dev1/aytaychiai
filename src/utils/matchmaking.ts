@@ -1,30 +1,25 @@
 import { supabase } from "./supabase";
 
-// TypeScript xatosini oldini olish uchun xavfsiz tekshiruv funksiyasi
 function getSupabaseClient() {
   if (!supabase) {
-    throw new Error("Supabase client is not initialized. Check your env variables.");
+    throw new Error("Supabase client is not initialized.");
   }
   return supabase;
 }
 
-// 1. O'yin qidirish va yaratish funksiyasi
+// 1. O'yin yaratish yoki boriga ulanish
 export async function findOrCreateMatch(playerId: string, playerName: string) {
   try {
-    if (!playerId) {
-      console.error("Xatolik: playerId bo'sh bo'lishi mumkin emas!");
-      return null;
-    }
-
+    if (!playerId) return null;
     const client = getSupabaseClient();
 
-    // Eski tiqilib qolgan 'waiting' o'yinlarimizni tozalaymiz
+    // Eski qotib qolgan qatorlarni tozalash
     await client
       .from("matches")
       .delete()
       .eq("player_id", playerId);
 
-    // Boshqa o'yinchi kutib turibdimi tekshiramiz
+    // Kutib turgan birinchi faol o'yinchini qidiramiz
     const { data: waitingMatches, error: searchError } = await client
       .from("matches")
       .select("*")
@@ -35,7 +30,7 @@ export async function findOrCreateMatch(playerId: string, playerName: string) {
 
     if (searchError) throw searchError;
 
-    // Agar raqib topilsa, unga ulanamiz
+    // Agar raqib bo'lsa, unga ulanamiz
     if (waitingMatches && waitingMatches.length > 0) {
       const targetMatch = waitingMatches[0];
       const generatedRoomId = `room_${targetMatch.player_id}_${playerId}`;
@@ -59,7 +54,7 @@ export async function findOrCreateMatch(playerId: string, playerName: string) {
       };
     }
 
-    // Kutayotgan hech kim bo'lmasa, navbatga turamiz
+    // Hech kim bo'lmasa, o'zimiz navbatga turamiz
     const { data: newMatch, error: insertError } = await client
       .from("matches")
       .insert([
@@ -78,12 +73,12 @@ export async function findOrCreateMatch(playerId: string, playerName: string) {
     return newMatch;
 
   } catch (error) {
-    console.error("Matchmaking tizimida xatolik yuz berdi:", error);
+    console.error("Matchmaking xatoligi:", error);
     return null;
   }
 }
 
-// 2. 🔥 APP.TSX KUTAYOTGAN EKSPORT: Realtime o'zgarishlarni eshitish funksiyasi
+// 2. 🔥 APP.TSX KUTAYOTGAN FUNKSIYA: Realtime o'zgarishlarni eshitish
 export function subscribeToMatchChanges(matchId: string, onUpdate: (payload: any) => void) {
   try {
     const client = getSupabaseClient();
@@ -99,12 +94,12 @@ export function subscribeToMatchChanges(matchId: string, onUpdate: (payload: any
       )
       .subscribe();
   } catch (error) {
-    console.error("Subscription xatoligi:", error);
+    console.error("Realtime obuna xatoligi:", error);
     return null;
   }
 }
 
-// 3. 🔥 APP.TSX KUTAYOTGAN EKSPORT: Lobbini tark etish (Cancel search) funksiyasi
+// 3. 🔥 APP.TSX KUTAYOTGAN FUNKSIYA: Lobbini tark etish (Taymer tugaganda o'chirish)
 export async function leaveMatchLobby(playerId: string) {
   try {
     if (!playerId) return;
