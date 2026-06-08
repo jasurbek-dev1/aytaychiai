@@ -7,6 +7,7 @@ import DevModal from './screens/DevModal';
 import type { Screen, Opponent, MatchFilters, BattleResult, UserProfile } from './types';
 import { getOrCreateProfile, updateProfileStats } from './utils/supabase';
 import { findOrCreateMatch, subscribeToMatchChanges, leaveMatchLobby } from './utils/matchmaking';
+import { supabase } from "./utils/supabase";
 import { Share2, Bot, ArrowLeft } from 'lucide-react';
 
 const tg = (window as any).Telegram?.WebApp;
@@ -105,7 +106,10 @@ export default function App() {
     };
   }, [timerRef, currentSubscription]);
 
-async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
+// Polling intervalini xavfsiz boshqarish uchun o'zgaruvchi
+  let activeInterval: ReturnType<typeof setInterval> | null = null;
+
+  async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
     if (!userProfile || !userProfile.id) {
       console.error("Profil yuklanmagan!");
       return;
@@ -115,11 +119,10 @@ async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
     setSearchingMatch(true);
     setShowFallbackOptions(false);
 
+    // Oldingi taymer va obunalar bo'lsa tozalaymiz
     if (timerRef) clearTimeout(timerRef);
     if (currentSubscription) {
-      try {
-        currentSubscription.unsubscribe();
-      } catch(e) { console.log(e); }
+      try { currentSubscription.unsubscribe(); } catch(e){}
     }
 
     // 1. Bazada lobbi yaratamiz yoki boriga ulanamiz
@@ -132,48 +135,60 @@ async function handleMatchFound(_opp: Opponent, f: MatchFilters) {
 
     setCurrentMatchId(matchRow.id);
 
-    // VARIANTI A: Agar biz kirganimizda allaqachon kimdir kutayotgan bo'lsa va biz ulandik
+    // Agar darhol raqib topilgan bo'lsa (Biz 2-o'yinchi bo'lsak va tayyor xonaga ulandik)
     if (matchRow.room_id) {
-      console.log("Raqib allaqachon bor ekan, o'yinga kirilyapti (Room):", matchRow.room_id);
+      console.log("Raqib tayyor! O'yinga kirildi:", matchRow.room_id);
       finalizeBattle(matchRow.room_id, matchRow.opponent_name || 'Online Opponent');
       return;
     }
 
-    // VARIANTI B: Agar biz birinchi bo'lib kutish rejimiga o'tgan bo'lsak
-    console.log("Lobbida kutish boshlandi, id:", matchRow.id);
+    // Agar biz 1-o'yinchi bo'lsak (waiting), har 2 soniyada bazadan tekshiramiz (Polling)
+    console.log("Kutish boshlandi, qator ID:", matchRow.id);
     
-    const sub = subscribeToMatchChanges(matchRow.id, (updatedRow: any) => {
-      console.log("Realtime: Bazada o'zgarish sezildi:", updatedRow);
-      
-      // 🔥 ENG MUHIM TUZATISH: Faqat statusni tekshirmaymiz. 
-      // Agar room_id paydo bo'lgan bo'lsa - demak raqib kelgan va biz uchrashganmiz!
-      if (updatedRow && updatedRow.room_id) {
-        console.log("Ura! Raqib ulandi. Room ID:", updatedRow.room_id);
-        
-        if (timerRef) clearTimeout(timerRef);
-        if (sub) {
-          try { sub.unsubscribe(); } catch(e){}
+    activeInterval = setInterval(async () => {
+      try {
+        // 🔥 TUZATISH: TypeScript xato bermasligi uchun supabase borligini tekshiramiz
+        if (!supabase) {
+          console.error("Supabase yuklanmagan!");
+          return;
         }
-        
-        // Baza to'liq yangilanib ulgurishi uchun 300ms kutib o'yinga kiramiz
-        setTimeout(() => {
-          finalizeBattle(updatedRow.room_id, updatedRow.opponent_name || 'Online Opponent');
-        }, 300);
+
+        const { data, error } = await supabase
+          .from("matches")
+          .select("*")
+          .eq("id", matchRow.id)
+          .single();
+
+        if (error) {
+          console.error("Polling xatoligi:", error);
+          return;
+        }
+
+        // Agar ikkinchi odam kelib, bizga room_id yozib ketgan bo'lsa!
+        if (data && data.room_id) {
+          if (activeInterval) {
+            clearInterval(activeInterval);
+            activeInterval = null;
+          }
+          if (timerRef) clearTimeout(timerRef);
+          
+          console.log("Raqib ulandi! O'yin boshlanmoqda... Room:", data.room_id);
+          finalizeBattle(data.room_id, data.opponent_name || 'Online Opponent');
+        }
+      } catch (err) {
+        console.error("Interval ichida xato:", err);
       }
-    });
+    }, 2000);
 
-    if (sub) {
-      setCurrentSubscription(sub);
-    }
-
-    // Kutish vaqtini 25 soniya qilamiz
+    // Maksimal kutish vaqti (25 soniya)
     const newTimer = setTimeout(async () => {
-      console.log("Kutish vaqti tugadi.");
-      if (sub) {
-        try { sub.unsubscribe(); } catch(e){}
+      if (activeInterval) {
+        clearInterval(activeInterval);
+        activeInterval = null;
       }
+      console.log("Kutish vaqti tugadi, raqib topilmadi.");
       
-      // Vaqt tugaganda bazadagi kutish qatorimizni o'chirib tashlaymiz
+      // Bazadagi kutish qatorimizni o'chirib tashlaymiz
       await leaveMatchLobby(userProfile.id);
       setShowFallbackOptions(true);
     }, 25000);
