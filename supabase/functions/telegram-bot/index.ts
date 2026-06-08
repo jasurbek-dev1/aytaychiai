@@ -16,6 +16,16 @@ bot.command("start", async (ctx: Context) => {
   const userId = ctx.from?.id;
   if (!userId) return;
 
+  // Do'stidan kelgan taklif kodini tutib olish (invite_123456)
+// ctx.match ni aniq string ekanligini tekshiramiz va string tipiga o'giramiz
+  const startPayload = typeof ctx.match === "string" ? ctx.match : "";
+
+  if (startPayload && startPayload.startsWith("invite_")) {
+    const inviterId = startPayload.replace("invite_", "");
+    console.log(`Foydalanuvchini taklif qilgan odam ID-si: ${inviterId}`);
+    // Bu yerda xohlasangiz bazada taklif qilgan odamga XP mukofot berish kodingizni yozishingiz mumkin
+  }
+
   const isSubscribed = await checkSubscription(userId);
   if (!isSubscribed) {
     const keyboard = new InlineKeyboard()
@@ -30,13 +40,18 @@ bot.command("start", async (ctx: Context) => {
     );
   }
 
+  // WebApp ochilganda ham startParamni ichkariga uzatib yuboramiz (Agarda kerak bo'lsa)
+  const webAppUrl = startPayload 
+    ? `https://aytaychiai.vercel.app/?startapp=${startPayload}`
+    : "https://aytaychiai.vercel.app/";
+
   const menu = new InlineKeyboard()
-    .webApp("🗣️ Speakingni boshlash", "https://aytaychiai.vercel.app/")
+    .webApp("🗣️ Speakingni boshlash", webAppUrl)
     .row()
     .url("👤 Admin bilan bog'lanish", "https://t.me/dasturchi_27");
 
   return ctx.reply("Hello! Ready to start your practice?", { reply_markup: menu });
-}); // Qavs shu yerda muvaffaqiyatli yopildi!
+});
 
 Deno.serve(async (req) => {
   try {

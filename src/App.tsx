@@ -150,10 +150,11 @@ export default function App() {
     setScreen('battle');
   }
 
- function handleInviteFriend() {
-  const startParam = `invite_${userProfile.id}`;
+function handleInviteFriend() {
+  // Har safar unikal bo'lishi uchun vaqt millisekundini qo'shamiz (Keshni urib tushirish uchun)
+  const cacheBuster = Date.now(); 
+  const startParam = `invite_${userProfile.id}_${cacheBuster}`;
   
-  // Universal ssilka formati (Qisqa nomlar talab qilinmaydi va adashmaydi):
   const webAppLink = `https://t.me/aytaychiai_bot?start=${startParam}`;
   
   const shareText = `⚔️ Come and duel with me in Clash of English! Let's see who speaks better! 🔥`;
